@@ -6,7 +6,7 @@ import numpy as np
 import copy
 # import cv2
 
-from utils.utils import plot_sucker
+from utilss.utils import plot_sucker
 
 SUCTION_ARRAY_LEN = 8
 EPS = 1e-8

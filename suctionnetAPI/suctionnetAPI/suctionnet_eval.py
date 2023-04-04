@@ -8,9 +8,9 @@ import os
 import open3d as o3d
 from suctionnet import SuctionNet
 from suction import SuctionGroup
-from utils.eval_utils import get_scene_name, create_table_points, parse_posevector,\
+from utilss.eval_utils import get_scene_name, create_table_points, parse_posevector,\
      transform_points, voxel_sample_points, eval_suction
-from utils.xmlhandler import xmlReader
+from utilss.xmlhandler import xmlReader
 
 
 class SuctionNetEval(SuctionNet):
@@ -103,6 +103,61 @@ class SuctionNetEval(SuctionNet):
             pose_list.append(mat)
         return obj_list, pose_list, camera_pose, align_mat
     
+    def eval_one_shot(self, scene_id, ann_id, suction_info):
+        threshold_list = [0.4, 0.5, 0.8]
+        TOP_K = 50
+        suction_group = SuctionGroup(suction_info)
+        model_list, dense_model_list, _ = self.get_scene_models(scene_id, ann_id=0)
+        table = create_table_points(1.0, 1.0, 0.05, dx=-0.5, dy=-0.5, dz=-0.05, grid_size=0.01)
+        model_sampled_list = list()
+        
+        for model in model_list:
+            model_sampled = voxel_sample_points(model, 0.005)
+            model_sampled_list.append(model_sampled)
+            
+            
+        _, pose_list, camera_pose, align_mat = self.get_model_poses(scene_id, ann_id)
+        table_trans = transform_points(table, np.linalg.inv(np.matmul(align_mat, camera_pose)))
+
+        suction_list, smoothness_score_list, wrench_score_list, collision_mask_list = eval_suction(suction_group, model_sampled_list, 
+                                                                                            dense_model_list, pose_list, align_mat, 
+                                                                                            camera_pose, table=table_trans)
+        # concat into scene level
+        # remove empty
+        suction_list = [x for x in suction_list if len(x[0])!= 0]
+        smoothness_score_list = [x for x in smoothness_score_list if len(x)!=0]
+        wrench_score_list = [x for x in wrench_score_list if len(x)!= 0]
+        collision_mask_list = [x for x in collision_mask_list if len(x)!=0]
+
+        suction_list, smoothness_score_list, wrench_score_list, collision_mask_list = np.concatenate(suction_list), \
+                                                                                    np.concatenate(smoothness_score_list), \
+                                                                                    np.concatenate(wrench_score_list), \
+                                                                                    np.concatenate(collision_mask_list)
+        
+        # sort in scene level
+        suction_confidence = suction_list[:, 0]
+        indices = np.argsort(-suction_confidence)
+        suction_list, smoothness_score_list, wrench_score_list, collision_mask_list = suction_list[indices], \
+                                                                                    smoothness_score_list[indices], \
+                                                                                    wrench_score_list[indices], \
+                                                                                    collision_mask_list[indices]
+
+        suction_accuracy = np.zeros((TOP_K,len(threshold_list)))
+        for threshold_idx, threshold in enumerate(threshold_list):
+            for k in range(0,TOP_K):
+                # scores[k,fric_idx] is the average score for top k suctions with coefficient of friction at fric
+                if k+1 > len(wrench_score_list):
+                    suction_accuracy[k, threshold_idx] = np.sum(((wrench_score_list * smoothness_score_list)>=threshold).astype(np.float32))/(k+1)
+                else:
+                    suction_accuracy[k, threshold_idx] = np.sum(((wrench_score_list[0:k+1] * smoothness_score_list[0:k+1])>=threshold).astype(np.float32))/(k+1)
+
+        # print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[0], np.mean(suction_accuracy[:,0]))) # 0.2
+        # print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[1], np.mean(suction_accuracy[:,1]))) # 0.4
+        # print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[2], np.mean(suction_accuracy[:,2]))) # 0.6
+        # print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[3], np.mean(suction_accuracy[:,3]))) # 0.8
+        # print('\rMean Accuracy for scene:{} ann:{} ='.format(scene_id, ann_id),np.mean(suction_accuracy[:, :]), end='\n')
+        return suction_accuracy
+    
     def eval_scene(self, scene_id, split, dump_folder):
         '''
         **Input:**
@@ -117,7 +172,7 @@ class SuctionNetEval(SuctionNet):
         
         - scene_accuracy: np.array of shape (256, 50, 6) of the accuracy tensor.
         '''
-        threshold_list = [0.2, 0.4, 0.6, 0.8]
+        threshold_list = [0.4, 0.5, 0.8]
         TOP_K = 50
 
         model_list, dense_model_list, _ = self.get_scene_models(scene_id, ann_id=0)
@@ -171,7 +226,7 @@ class SuctionNetEval(SuctionNet):
             print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[0], np.mean(suction_accuracy[:,0]))) # 0.2
             print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[1], np.mean(suction_accuracy[:,1]))) # 0.4
             print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[2], np.mean(suction_accuracy[:,2]))) # 0.6
-            print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[3], np.mean(suction_accuracy[:,3]))) # 0.8
+            # print('Mean Accuracy for suctions in view {} under threshold {}: {:.6f}'.format(ann_id, threshold_list[3], np.mean(suction_accuracy[:,3]))) # 0.8
             print('\rMean Accuracy for scene:{} ann:{} ='.format(scene_id, ann_id),np.mean(suction_accuracy[:, :]), end='\n')
             scene_accuracy.append(suction_accuracy)
         
@@ -592,7 +647,7 @@ if __name__ == "__main__":
     # camera = 'kinect'
     camera = 'realsense'
     split = 'test_seen'
-    dump_folder = '/home/tidy/icra2023/suction_save'
+    dump_folder = '/home/tidy/PycharmProjects/graspnet/results'
     # is dense_root needed?
     suction_eval = SuctionNetEval(data_root, camera, split)
     res, ap = suction_eval.eval_seen(dump_folder, proc=2)

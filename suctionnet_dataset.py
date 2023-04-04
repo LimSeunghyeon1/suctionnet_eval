@@ -7,12 +7,10 @@ from PIL import Image
 import scipy.io as scio
 import random
 import torch
-# from torch._six import container_abcs
-import collections.abc as container_abcs
+from torch._six import container_abcs
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from utils.image import get_affine_transform, gaussian_radius, draw_msra_gaussian
-
 
 BASEDIR = os.path.dirname(os.path.abspath(__file__))
 CFGPATH = '{}/cfg'.format(BASEDIR)
@@ -63,7 +61,7 @@ def drawGaussian(img, pt, score, sigma=1):
     # print('x:', x.shape)
     x0 = y0 = size // 2
     # The gaussian is not normalized, we want the center value to equal 1
-    
+
     # print('g:', g.shape)
     # Usable gaussian range
     g_x = max(0, -ul[0]), min(br[0], img.shape[1]) - ul[0]
@@ -107,7 +105,7 @@ class SuctionNetDataset(Dataset):
         #     for img_num in range(256):
         #         self.data_list.append([int(x.strip().split('_')[1]), img_num])
         # f.close()
-        
+
         self.data_list = []
         if split == 'train':
             for scene_idx in range(0, 100):
@@ -133,22 +131,24 @@ class SuctionNetDataset(Dataset):
         if split == 'train':
             random.shuffle(self.data_list)
 
-    
     def __len__(self):
         return len(self.data_list)
 
     def __getitem__(self, index):
         scene_idx, anno_idx = self.data_list[index][0], self.data_list[index][1]
 
-        dump_dir = os.path.join(self.label_root, 'center_anno', 'scene_%d'%scene_idx, self.camera, '0255.npz')
-        bbox_dir = os.path.join(self.label_root, 'bbox_anno', 'scene_%d'%scene_idx, self.camera, '0255.npz')
+        dump_dir = os.path.join(self.label_root, 'center_anno', 'scene_%d' % scene_idx, self.camera, '0255.npz')
+        bbox_dir = os.path.join(self.label_root, 'bbox_anno', 'scene_%d' % scene_idx, self.camera, '0255.npz')
         center_dump = np.load(dump_dir)['arr_0'][anno_idx]
         bbox_dump = np.load(bbox_dir)['arr_0'][anno_idx]
 
-        color_dir = os.path.join(self.data_root, 'scenes', 'scene_%04d'%scene_idx, self.camera, 'rgb', str(anno_idx).zfill(4)+'.png')
-        depth_dir = os.path.join(self.data_root, 'scenes', 'scene_%04d'%scene_idx, self.camera, 'depth', str(anno_idx).zfill(4)+'.png')
-        score_dir = os.path.join(self.label_root, 'score_maps', 'scene_%d'%scene_idx, self.camera, 'numpy', '%04d.npz'%anno_idx)
-        
+        color_dir = os.path.join(self.data_root, 'scenes', 'scene_%04d' % scene_idx, self.camera, 'rgb',
+                                 str(anno_idx).zfill(4) + '.png')
+        depth_dir = os.path.join(self.data_root, 'scenes', 'scene_%04d' % scene_idx, self.camera, 'depth',
+                                 str(anno_idx).zfill(4) + '.png')
+        score_dir = os.path.join(self.label_root, 'score_maps', 'scene_%d' % scene_idx, self.camera, 'numpy',
+                                 '%04d.npz' % anno_idx)
+
         # center_dir = os.path.join(self.label_root, 'center_anno', 'scene_%d'%scene_idx, self.camera, 'numpy', '%04d.npz'%anno_idx)
         # colli_dir = os.path.join(self.label_root, 'scene_%d'%scene_idx, self.camera, 'colli_mask', '%04d.npz'%anno_idx)
         # wrench_dir = os.path.join(self.label_root, 'scene_%d'%scene_idx, self.camera, 'wrench', '%04d.npz'%anno_idx)
@@ -165,7 +165,7 @@ class SuctionNetDataset(Dataset):
         score = np.load(score_dir)['arr_0']
         # toc = time.time()
         # print('score map load time:', toc-tic)
-        
+
         center_map = np.zeros_like(depth)
         for i in range(center_dump.shape[0]):
             center = center_dump[i]
@@ -174,10 +174,9 @@ class SuctionNetDataset(Dataset):
                 drawGaussian(center_map, coord, 1, 5)
             else:
                 bbox = bbox_dump[i]
-                bbox_h, bbox_w = bbox[2]-bbox[0], bbox[3]-bbox[1]
+                bbox_h, bbox_w = bbox[2] - bbox[0], bbox[3] - bbox[1]
                 radius = gaussian_radius((math.ceil(bbox_h), math.ceil(bbox_w)))
                 draw_msra_gaussian(center_map, coord, radius)
-        
 
         if self.split == 'train':
             color, depth, score, center_map = self.crop_array(color, depth, score, center_map, self.dim)
@@ -189,22 +188,24 @@ class SuctionNetDataset(Dataset):
             depth = depth + depth_noise
 
         return color, depth, score, center_map, (scene_idx, anno_idx)
-    
 
     def debug(self, saveroot):
-        
+
         for index in range(30):
             scene_idx, anno_idx = self.data_list[index][0], self.data_list[index][1]
 
-            dump_dir = os.path.join(self.label_root, 'center_anno', 'scene_%d'%scene_idx, self.camera, '0255.npz')
-            bbox_dir = os.path.join(self.label_root, 'bbox_anno', 'scene_%d'%scene_idx, self.camera, '0255.npz')
+            dump_dir = os.path.join(self.label_root, 'center_anno', 'scene_%d' % scene_idx, self.camera, '0255.npz')
+            bbox_dir = os.path.join(self.label_root, 'bbox_anno', 'scene_%d' % scene_idx, self.camera, '0255.npz')
             center_dump = np.load(dump_dir)['arr_0'][anno_idx]
             bbox_dump = np.load(bbox_dir)['arr_0'][anno_idx]
 
-            color_dir = os.path.join(self.data_root, 'scenes', 'scene_%04d'%scene_idx, self.camera, 'rgb', str(anno_idx).zfill(4)+'.png')
-            depth_dir = os.path.join(self.data_root, 'scenes', 'scene_%04d'%scene_idx, self.camera, 'depth', str(anno_idx).zfill(4)+'.png')
-            score_dir = os.path.join(self.label_root, 'score_maps', 'scene_%d'%scene_idx, self.camera, 'numpy', '%04d.npz'%anno_idx)
-            
+            color_dir = os.path.join(self.data_root, 'scenes', 'scene_%04d' % scene_idx, self.camera, 'rgb',
+                                     str(anno_idx).zfill(4) + '.png')
+            depth_dir = os.path.join(self.data_root, 'scenes', 'scene_%04d' % scene_idx, self.camera, 'depth',
+                                     str(anno_idx).zfill(4) + '.png')
+            score_dir = os.path.join(self.label_root, 'score_maps', 'scene_%d' % scene_idx, self.camera, 'numpy',
+                                     '%04d.npz' % anno_idx)
+
             # center_dir = os.path.join(self.label_root, 'center_anno', 'scene_%d'%scene_idx, self.camera, 'numpy', '%04d.npz'%anno_idx)
             # colli_dir = os.path.join(self.label_root, 'scene_%d'%scene_idx, self.camera, 'colli_mask', '%04d.npz'%anno_idx)
             # wrench_dir = os.path.join(self.label_root, 'scene_%d'%scene_idx, self.camera, 'wrench', '%04d.npz'%anno_idx)
@@ -223,10 +224,10 @@ class SuctionNetDataset(Dataset):
                     drawGaussian(center_map, coord, 1, 5)
                 else:
                     bbox = bbox_dump[i]
-                    bbox_h, bbox_w = bbox[2]-bbox[0], bbox[3]-bbox[1]
+                    bbox_h, bbox_w = bbox[2] - bbox[0], bbox[3] - bbox[1]
                     radius = gaussian_radius((math.ceil(bbox_h), math.ceil(bbox_w)))
                     draw_msra_gaussian(center_map, coord, radius)
-        
+
             # center_map = center_map[..., 0]
 
             # color = cv2.resize(color, self.dim, interpolation=cv2.INTER_LINEAR)
@@ -252,7 +253,7 @@ class SuctionNetDataset(Dataset):
             # print('idx0:', type(idx0))
             score_image = score
             wrench_image = center_map
-            
+
             score_image *= 255
             score_image = score_image.clip(0, 255)
             score_image = score_image.astype(np.uint8)
@@ -262,15 +263,15 @@ class SuctionNetDataset(Dataset):
             rgb_image = 0.5 * color + 0.5 * score_image
             rgb_image = rgb_image.astype(np.uint8)
             im = Image.fromarray(rgb_image)
-            
-            visu_dir = os.path.join(saveroot, 'scene_'+str(scene_idx))
+
+            visu_dir = os.path.join(saveroot, 'scene_' + str(scene_idx))
             os.makedirs(visu_dir, exist_ok=True)
-            print('Saving:', visu_dir+'/score_%04d'%anno_idx+'.png')
+            print('Saving:', visu_dir + '/score_%04d' % anno_idx + '.png')
             # start_time = time.time()
-            im.save(visu_dir+'/score_%04d'%anno_idx+'.png')
+            im.save(visu_dir + '/score_%04d' % anno_idx + '.png')
 
             wrench_image *= 255
-            
+
             wrench_image = wrench_image.clip(0, 255)
             wrench_image = wrench_image.astype(np.uint8)
             wrench_image = cv2.applyColorMap(wrench_image[..., np.newaxis], cv2.COLORMAP_RAINBOW)
@@ -279,19 +280,18 @@ class SuctionNetDataset(Dataset):
             rgb_image = 0.5 * color + 0.5 * wrench_image
             rgb_image = rgb_image.astype(np.uint8)
             im = Image.fromarray(rgb_image)
-            
-            visu_dir = os.path.join(saveroot, 'scene_'+str(scene_idx))
-            os.makedirs(visu_dir, exist_ok=True)
-            print('Saving:', visu_dir+'/wrench_%04d'%anno_idx+'.png')
-            # start_time = time.time()
-            im.save(visu_dir+'/wrench_%04d'%anno_idx+'.png')
 
+            visu_dir = os.path.join(saveroot, 'scene_' + str(scene_idx))
+            os.makedirs(visu_dir, exist_ok=True)
+            print('Saving:', visu_dir + '/wrench_%04d' % anno_idx + '.png')
+            # start_time = time.time()
+            im.save(visu_dir + '/wrench_%04d' % anno_idx + '.png')
 
     def augment(self, img, depth, score, center_map):
         input_h, input_w = img.shape[0], img.shape[1]
         s = max(input_h, input_w) * 1.0
         c = np.array([input_w / 2., input_h / 2.], dtype=np.float32)
-        
+
         # flipped = False
         flip = 0.3
 
@@ -300,7 +300,7 @@ class SuctionNetDataset(Dataset):
         h_border = self._get_border(128, img.shape[0])
         c[0] = np.random.randint(low=w_border, high=img.shape[1] - w_border)
         c[1] = np.random.randint(low=h_border, high=img.shape[0] - h_border)
-        
+
         if np.random.random() < flip:
             # flipped = True
             img = img[:, ::-1, :]
@@ -308,20 +308,20 @@ class SuctionNetDataset(Dataset):
             score = score[:, ::-1]
             center_map = center_map[:, ::-1]
             c[0] = input_w - c[0] - 1
-        
+
         trans_input = get_affine_transform(c, s, 0, [input_w, input_h])
-        img = cv2.warpAffine(img, trans_input, 
-                            (input_w, input_h),
-                            flags=cv2.INTER_LINEAR)
-        depth = cv2.warpAffine(depth, trans_input, 
-                            (input_w, input_h),
-                            flags=cv2.INTER_LINEAR)
-        score = cv2.warpAffine(score, trans_input, 
-                            (input_w, input_h),
-                            flags=cv2.INTER_NEAREST)
-        center_map = cv2.warpAffine(center_map, trans_input, 
-                            (input_w, input_h),
-                            flags=cv2.INTER_NEAREST)
+        img = cv2.warpAffine(img, trans_input,
+                             (input_w, input_h),
+                             flags=cv2.INTER_LINEAR)
+        depth = cv2.warpAffine(depth, trans_input,
+                               (input_w, input_h),
+                               flags=cv2.INTER_LINEAR)
+        score = cv2.warpAffine(score, trans_input,
+                               (input_w, input_h),
+                               flags=cv2.INTER_NEAREST)
+        center_map = cv2.warpAffine(center_map, trans_input,
+                                    (input_w, input_h),
+                                    flags=cv2.INTER_NEAREST)
 
         return img, depth, score, center_map
 
@@ -330,25 +330,32 @@ class SuctionNetDataset(Dataset):
         while size - border // i <= border // i:
             i *= 2
         return border // i
-    
+
     def crop_array(self, color, depth, score, center_map, t_size=(480, 480)):
         height, width = color.shape[0], color.shape[1]
         center_x = np.random.randint(t_size[1] // 2, width - t_size[1] // 2)
         center_y = np.random.randint(t_size[0] // 2, height - t_size[0] // 2)
 
-        cropped_color = color[center_y-t_size[0]//2:center_y+t_size[0]//2, center_x-t_size[1]//2:center_x+t_size[1]//2]
-        cropped_depth = depth[center_y-t_size[0]//2:center_y+t_size[0]//2, center_x-t_size[1]//2:center_x+t_size[1]//2]
-        cropped_score = score[center_y-t_size[0]//2:center_y+t_size[0]//2, center_x-t_size[1]//2:center_x+t_size[1]//2]
-        cropped_center_map = center_map[center_y-t_size[0]//2:center_y+t_size[0]//2, center_x-t_size[1]//2:center_x+t_size[1]//2]
+        cropped_color = color[center_y - t_size[0] // 2:center_y + t_size[0] // 2,
+                        center_x - t_size[1] // 2:center_x + t_size[1] // 2]
+        cropped_depth = depth[center_y - t_size[0] // 2:center_y + t_size[0] // 2,
+                        center_x - t_size[1] // 2:center_x + t_size[1] // 2]
+        cropped_score = score[center_y - t_size[0] // 2:center_y + t_size[0] // 2,
+                        center_x - t_size[1] // 2:center_x + t_size[1] // 2]
+        cropped_center_map = center_map[center_y - t_size[0] // 2:center_y + t_size[0] // 2,
+                             center_x - t_size[1] // 2:center_x + t_size[1] // 2]
         return cropped_color, cropped_depth, cropped_score, cropped_center_map
+
 
 def grayscale(image):
     return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
+
 def lighting_(data_rng, image, alphastd, eigval, eigvec):
-    alpha = data_rng.normal(scale=alphastd, size=(3, ))
+    alpha = data_rng.normal(scale=alphastd, size=(3,))
     image += np.dot(eigvec, eigval * alpha)
     return image
+
 
 def blend_(alpha, image1, image2):
     image1 *= alpha
@@ -356,18 +363,22 @@ def blend_(alpha, image1, image2):
     image1 += image2
     return image1
 
+
 def saturation_(data_rng, image, gs, gs_mean, var):
     alpha = 1. + data_rng.uniform(low=-var, high=var)
     return blend_(alpha, image, gs[:, :, None])
+
 
 def brightness_(data_rng, image, gs, gs_mean, var):
     alpha = 1. + data_rng.uniform(low=-var, high=var)
     image *= alpha
     return image
 
+
 def contrast_(data_rng, image, gs, gs_mean, var):
     alpha = 1. + data_rng.uniform(low=-var, high=var)
     return blend_(alpha, image, gs_mean)
+
 
 def color_aug(data_rng, image):
     functions = [brightness_, contrast_, saturation_]
@@ -379,6 +390,7 @@ def color_aug(data_rng, image):
         image = f(data_rng, image, gs, gs_mean, 0.4)
     # image = lighting_(data_rng, image, 0.1, eig_val, eig_vec)
     return image
+
 
 def color_aug2(data_rng, image, eig_val, eig_vec):
     functions = [brightness_, contrast_, saturation_]

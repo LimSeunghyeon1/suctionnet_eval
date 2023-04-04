@@ -1,12 +1,13 @@
 from ast import dump
+import sys
 from suctionnetAPI import SuctionNetEval
 
 if __name__ == "__main__":
-    dataset_root = '/DATA2/Benchmark/suctionnet'
+    dataset_root = '/home/tidy/PycharmProjects/graspnet'
     camera = 'realsense'
     suctionnet_eval = SuctionNetEval(root=dataset_root, camera=camera)
     
-    result_path = '/DATA2/Benchmark/suction/inference_results/deeplabV3plus'
+    result_path = '/home/tidy/PycharmProjects/graspnet/log'
     # evaluate all the test splits
     # res is the raw evaluation results, ap_top50 and ap_top1 are average precision of top 50 and top 1 suctions
     # see our paper for details

@@ -11,7 +11,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_root', default='', help='Directory to save dataset')
-parser.add_argument('--saveroot', default='', help='Directory to save score map results')
+parser.add_argument('--saveroot', default='/media/tidy/Extreme SSD/graspnet_sh', help='Directory to save score map results')
 parser.add_argument('--save_visu', action='store_true', help='Whether to save visualizations')
 parser.add_argument('--camera', default='realsense', help='Camera to use [default: realsense]')
 parser.add_argument('--sigma', type=int, default=4, help='Gaussian Kernel sigma')
@@ -24,6 +24,7 @@ scenedir = FLAGS.data_root + '/scenes/scene_{}/{}'
 labeldir = os.path.join(DATASET_ROOT, 'seal_label')
 saveroot = os.path.join(FLAGS.saveroot, 'score_maps')
 colli_root = os.path.join(DATASET_ROOT, 'suction_collision_label')
+# colli_root = os.path.join(DATASET_ROOT, 'collision_label')
 
 class CameraInfo():
     def __init__(self, width, height, fx, fy, cx, cy, scale):
@@ -184,10 +185,12 @@ def drawGaussian(img, pt, score, sigma=1):
 
 def score_mapping(scene_idx, camera):
     if not os.path.exists(colli_root+'/{:04d}_collision.npz'.format(scene_idx)):
+    # if not os.path.exists(colli_root+'/scene_{:04d}/collision_labels.npz'.format(scene_idx)):
         print('Missing ' + colli_root+'/{:04d}_collision.npz'.format(scene_idx))
         return
+
         
-    collision_dump = np.load(colli_root+'/{:04d}_collision.npz'.format(scene_idx))
+    collision_dump = np.load(colli_root+'/scene_{:04d}/collision_labels.npz'.format(scene_idx))
 
     for anno_idx in range(256):
         
@@ -197,16 +200,15 @@ def score_mapping(scene_idx, camera):
         # k_size = 31
         # sigma = 5
         score_image = np.zeros([720, 1280], dtype=np.float32)
-
         _, obj_list, pose_list = generate_scene_model(DATASET_ROOT, 'scene_%04d'%scene_idx, anno_idx, return_poses=True, 
                                                         align=True, camera=camera) 
         
         for i in range(len(obj_list)):
             obj_idx = obj_list[i]
             trans = pose_list[i]
-            sampled_points, normals, scores, _ = get_model_grasps('%s/%03d_seal.npz'%(labeldir, obj_idx))
+            sampled_points, normals, scores, collision = get_model_grasps('%s/%03d_seal.npz'%(labeldir, obj_idx))
             
-            collision = collision_dump['arr_{}'.format(i)]
+            # collision = collision_dump['arr_{}'.format(i)]
 
             sampled_points = transform_points(sampled_points, trans)
             
@@ -216,6 +218,7 @@ def score_mapping(scene_idx, camera):
             normals = normals / np.linalg.norm(normals, axis=-1)[:, np.newaxis]
 
             vert_idx = normals[:, 2] > 0.5
+            # print("vert idx", vert_idx.shape, "sampled_points", sampled_points.shape, "collision", collision.shape, "i", i, "obj_list", obj_list, "scene idx", scene_idx, "anno idx", anno_idx, "normals ", normals.shape, "scores shape", scores.shape)
             sampled_points = sampled_points[vert_idx]
             scores = scores[vert_idx]
             collision = collision[vert_idx]
@@ -275,7 +278,7 @@ if __name__ == "__main__":
     camera = FLAGS.camera   
     
     scene_list = []
-    for i in range(0, 100):
+    for i in range(100, 190):
         scene_list.append(i)
 
     pool_size = FLAGS.pool_size

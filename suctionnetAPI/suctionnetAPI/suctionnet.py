@@ -52,10 +52,10 @@ import cv2
 import trimesh
 
 from suction import Suction, SuctionGroup
-from utils.utils import generate_scene_model, plot_sucker_collision, transform_points, parse_posevector, create_table_cloud, get_model_suctions, \
+from utilss.utils import generate_scene_model, plot_sucker_collision, transform_points, parse_posevector, create_table_cloud, get_model_suctions, \
     plot_sucker
-from utils.xmlhandler import xmlReader
-from utils.rotation import viewpoint_to_matrix
+from utilss.xmlhandler import xmlReader
+from utilss.rotation import viewpoint_to_matrix
 
 
 TOTAL_SCENE_NUM = 190

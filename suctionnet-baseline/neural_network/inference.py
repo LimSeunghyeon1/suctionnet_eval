@@ -11,6 +11,27 @@ import ConvNet
 import torch.nn.functional as F
 from PIL import Image
 import cv2
+from sklearn.metrics import average_precision_score
+import sys
+sys.path.append('/home/tidy/plane_detection')
+from modules.suctionnet_inference_util import get_heatmap
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
 
 parser = argparse.ArgumentParser()
@@ -19,10 +40,10 @@ parser.add_argument("--num_classes", type=int, default=2)
 parser.add_argument("--output_stride", type=int, default=16, choices=[8, 16])
 parser.add_argument('--log_dir', default='log_inf', help='Dump dir to save model checkpoint [default: log]')
 parser.add_argument('--split', default='test_seen', help='dataset split [default: test_seen]')
-parser.add_argument('--camera', default='kinect', help='camera to use [default: kinect]')
-parser.add_argument('--dataset_root', default='/DATA2/Benchmark/graspnet', help='where dataset is')
-parser.add_argument('--save_dir', default='/DATA2/Benchmark/suction/inference_results/deeplabV3plus', help='Dump dir to save model checkpoint [default: log]')
-parser.add_argument('--checkpoint_path', default='checkpoints/checkpoint_30', help='Model checkpoint path [default: None]')
+parser.add_argument('--camera', default='realsense', help='camera to use [default: kinect]')
+parser.add_argument('--dataset_root', default='/home/tidy/PycharmProjects/graspnet/test_scenes', help='where dataset is')
+parser.add_argument('--save_dir', default='/home/tidy/PycharmProjects/graspnet/results/', help='Dump dir to save model checkpoint [default: log]')
+parser.add_argument('--checkpoint_path', default='/home/tidy/PycharmProjects/graspnet/weights/realsense-deeplabplus-RGBD.pth', help='Model checkpoint path [default: None]')
 parser.add_argument('--overwrite', action='store_true', help='Overwrite existing log and dump folders.')
 parser.add_argument('--save_visu', action='store_true', help='whether to save visualizations.')
 FLAGS = parser.parse_args()
@@ -35,6 +56,17 @@ split = FLAGS.split
 camera = FLAGS.camera
 dataset_root = FLAGS.dataset_root
 scene_list = []
+print("CHECKPOINT PATH", CHECKPOINT_PATH)
+
+
+total_ap_4_50 = AverageMeter()
+total_ap_5_50 = AverageMeter()
+total_ap_8_50 = AverageMeter()
+
+total_ap_4_1 = AverageMeter()
+total_ap_5_1 = AverageMeter()
+total_ap_8_1 = AverageMeter()
+
 
 # # Prepare LOG_DIR and DUMP_DIR
 # if os.path.exists(LOG_DIR) and FLAGS.overwrite:
@@ -57,6 +89,16 @@ scene_list = []
 #     LOG_FOUT.write(out_str+'\n')
 #     LOG_FOUT.flush()
 #     print(out_str)
+
+
+def get_average_precision_for_sampled(heatmap_1d, gt_1d, topk=50, thresh=.5):
+    ind, infer_value = topk_by_partition(heatmap_1d, topk, ascending=False)
+    gt_over_thresh = (gt_1d[ind] > thresh).astype(np.float32)
+    # gt_over_thresh = (gt_1d[infer_loc] > thresh).astype(np.float32)
+    ap = average_precision_score(gt_over_thresh, heatmap_1d)
+    
+    
+    return ap
 
 def my_worker_init_fn(worker_id):
     np.random.seed(np.random.get_state()[1][0] + worker_id)
@@ -163,7 +205,6 @@ def drawGaussian(img, pt, score, sigma=1):
     torch.Tensor
         A tensor with shape: `(3, H, W)`.
     """
-    print("img shape",img.shape)
     # img = to_numpy(img)
     tmp_img = np.zeros([img.shape[0], img.shape[1]], dtype=np.float32)
     tmpSize = 3 * sigma
@@ -198,10 +239,10 @@ def get_suction_from_heatmap(depth_img, heatmap, camera_info):
     if len(depth_img.shape) == 3:
         depth_img = depth_img[..., 0]
     point_cloud = create_point_cloud_from_depth_image(depth_img, camera_info)
-    
+
     suction_points = point_cloud[idx0, idx1, :]
     tic_sub = time.time()
-
+    # print("suction points", suction_points.shape)
     point_cloud = point_cloud.reshape(-1, 3)
 
     pc_o3d = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(point_cloud))
@@ -216,13 +257,13 @@ def get_suction_from_heatmap(depth_img, heatmap, camera_info):
     suction_normals = pc_normals[:suction_points.shape[0], :]
 
     toc_sub = time.time()
-    print('estimate normal time:', toc_sub - tic_sub)
+    # print('estimate normal time:', toc_sub - tic_sub)
 
     suction_arr = np.concatenate([suction_scores[..., np.newaxis], suction_normals, suction_points], axis=-1)
 
     return suction_arr, idx0, idx1
 
-def inference_one_view(rgb_file, depth_file, meta_file, scene_idx, anno_idx):
+def inference_one_view(rgb_file, depth_file, meta_file, gt, scene_idx, anno_idx):
     k_size = 15
     kernel = uniform_kernel(k_size)
     kernel = torch.from_numpy(kernel).unsqueeze(0).unsqueeze(0).cuda()
@@ -257,30 +298,53 @@ def inference_one_view(rgb_file, depth_file, meta_file, scene_idx, anno_idx):
         pred = net(rgbd)
     pred = pred.clamp(0, 1)
     toc = time.time()
-    print('inference time:', toc - tic)
+    # print('inference time:', toc - tic)
     start = time.time()
+
     # torch.cuda.synchronize()
     # start = time.time()
     heatmap = (pred[0, 0] * pred[0, 1]).unsqueeze(0).unsqueeze(0)
     # print("heatmap time", time.time() - start)
-    print("HEATMAP BEFORE CONVOLUTION", heatmap.shape, "kernel size", kernel.shape)
+    # print("HEATMAP BEFORE CONVOLUTION", heatmap.shape, "kernel size", kernel.shape)
     # print(heatmap)
     start = time.time()
-
+    # print("haha finish")
     heatmap = F.conv2d(heatmap, kernel, padding=(kernel.shape[2] // 2, kernel.shape[3] // 2)).squeeze().cpu().numpy()
     # print("cpu time", time.time() - start)
     # print("HEATMAP AFTER CONVOLUTION",heatmap.shape)
     # print(heatmap)
     # heatmap = F.conv2d(heatmap, kernel, padding=(kernel.shape[2] // 2, kernel.shape[3] // 2)).squeeze()
     suctions, idx0, idx1 = get_suction_from_heatmap(depth.numpy(), heatmap, camera_info)
+    # print("heatmap", heatmap.shape)
+    # print("heatmaps!!!!")
+    selected_heatmap = heatmap.reshape(-1)[idx0 * 1280 + idx1]
+    gt_selected = gt.reshape(-1)[idx0 * 1280 + idx1]
+    # ap = get_average_precision_for_sampled(selected_heatmap, gt_selected, topk=50, thresh=.5)
+    print("selected heatmap", selected_heatmap.shape)
+    print("gt heatmap", gt_selected.shape)
+    # print("ddds")
+    total_ap_5_50.update(get_average_precision_for_sampled(selected_heatmap, gt_selected, 50, .5))
+    total_ap_4_50.update(get_average_precision_for_sampled(selected_heatmap, gt_selected, 50, .4))
+    total_ap_8_50.update(get_average_precision_for_sampled(selected_heatmap, gt_selected, 50, .8))
+    
+    total_ap_5_1.update(get_average_precision_for_sampled(selected_heatmap, gt_selected, 1, .5))
+    total_ap_4_1.update(get_average_precision_for_sampled(selected_heatmap, gt_selected, 1, .4))
+    total_ap_8_1.update(get_average_precision_for_sampled(selected_heatmap, gt_selected, 1, .8))
+    print(f"5_50 : {total_ap_5_50.avg}, 4_50 : {total_ap_4_50.avg}, 8_50 : {total_ap_8_50.avg}")
+    print(f"5_1 : {total_ap_5_1.avg}, 4_1 : {total_ap_4_1.avg}, 8_1 : {total_ap_8_1.avg}")
+    # print("finish")
+
+
+    '''
+    
     save_dir = os.path.join(SAVE_PATH, split, 'scene_%04d'%scene_idx, camera, 'suction')
     os.makedirs(save_dir, exist_ok=True)
     suction_numpy_file = os.path.join(save_dir, '%04d.npz'%anno_idx)
     print('Saving:', suction_numpy_file)
 
     np.savez(suction_numpy_file, suctions)
-
-    if anno_idx < 3 and FLAGS.save_visu:
+    '''
+    if FLAGS.save_visu:
         rgb_img = rgbd[0].permute(1, 2, 0)[..., :3].cpu().numpy()
         rgb_img *= 255
         
@@ -334,28 +398,75 @@ def inference_one_view(rgb_file, depth_file, meta_file, scene_idx, anno_idx):
         sampled_img = cv2.applyColorMap(sampled_img.astype(np.uint8), cv2.COLORMAP_RAINBOW)
         sampled_img = sampled_img * 0.5 + rgb_img * 0.5
         sampled_img = sampled_img.astype(np.uint8)
-        sampled_img = Image.fromarray(sampled_img)
+        # sampled_img = Image.fromarray(sampled_img)
         
         sampled_dir = os.path.join(SAVE_PATH, split, 'scene_%04d'%scene_idx, camera, 'visu')
         os.makedirs(sampled_dir, exist_ok=True)
         sampled_file = os.path.join(sampled_dir, '%04d_sampled.png'%anno_idx)
-        print('saving:', sampled_file)
-        sampled_img.save(sampled_file)      
+        cv2.imwrite(sampled_file, sampled_img)
+        # print('saving:', sampled_file)
+        # sampled_img.save(sampled_file)      
+
+
 
 
 def inference(scene_idx):
-    
+    camera = 'realsense'
     for anno_idx in range(256):
-
+        print("scene idx", scene_idx, "anno idx", anno_idx)
         rgb_file = os.path.join(dataset_root, 'scenes/scene_{:04d}/{}/rgb/{:04d}.png'.format(scene_idx, camera, anno_idx))
         depth_file = os.path.join(dataset_root, 'scenes/scene_{:04d}/{}/depth/{:04d}.png'.format(scene_idx, camera, anno_idx))
         # segmask_file = os.path.join(dataset_root, 'scenes/scene_{:04d}/kinect/label/{:04d}.png'.format(scene_idx, anno_idx))
         meta_file = os.path.join(dataset_root, 'scenes/scene_{:04d}/{}/meta/{:04d}.mat'.format(scene_idx, camera, anno_idx))
+        full_path = rgb_file
+        img_idx = int(full_path.split('/')[-1][:-4])
+        scene_op = full_path.split('/')[-4][:-4] + str(int(full_path.split('/')[-4][-4:]))
+        center_root = '/media/tidy/Extreme SSD/graspnet_sh/center_anno/' + scene_op + '/' + full_path.split('/')[-3] + '/0255.npz'
+        bbox_root = '/media/tidy/Extreme SSD/graspnet_sh/bbox_anno/' + scene_op + '/' + full_path.split('/')[-3] + '/0255.npz'
+        center_points = torch.FloatTensor(np.load(center_root)['arr_0'][img_idx])
+        bbox_points = torch.FloatTensor(np.load(bbox_root)['arr_0'][img_idx])
+        score_full_path = '/media/tidy/Extreme SSD/graspnet_sh/score_maps/' + str(scene_op) +\
+            '/' + full_path.split('/')[-3] + '/numpy/' + full_path.split('/')[-1][:-4]+'.npz'
 
-        inference_one_view(rgb_file, depth_file, meta_file, scene_idx, anno_idx)
+        score_image_np = np.load(score_full_path)['arr_0']
+        score_image = torch.FloatTensor(score_image_np)
+        gt = get_heatmap(center_points, bbox_points, score_image).view(-1).cpu().numpy()
+
+        inference_one_view(rgb_file, depth_file, meta_file, gt, scene_idx, anno_idx)
+
+def one_view_main():
+    scene_idx = 110
+    
+    anno_idx = 0
+    
+    rgb_file = os.path.join(dataset_root, 'scenes/scene_{:04d}/{}/rgb/{:04d}.png'.format(scene_idx, camera, anno_idx))
+    depth_file = os.path.join(dataset_root, 'scenes/scene_{:04d}/{}/depth/{:04d}.png'.format(scene_idx, camera, anno_idx))
+    # segmask_file = os.path.join(dataset_root, 'scenes/scene_{:04d}/kinect/label/{:04d}.png'.format(scene_idx, anno_idx))
+    meta_file = os.path.join(dataset_root, 'scenes/scene_{:04d}/{}/meta/{:04d}.mat'.format(scene_idx, camera, anno_idx))
+    full_path = rgb_file
+    img_idx = int(full_path.split('/')[-1][:-4])
+    scene_op = full_path.split('/')[-4][:-4] + str(int(full_path.split('/')[-4][-4:]))
+    center_root = '/media/tidy/Extreme SSD/graspnet_sh/center_anno/' + scene_op + '/' + full_path.split('/')[-3] + '/0255.npz'
+    bbox_root = '/media/tidy/Extreme SSD/graspnet_sh/bbox_anno/' + scene_op + '/' + full_path.split('/')[-3] + '/0255.npz'
+    center_points = torch.FloatTensor(np.load(center_root)['arr_0'][img_idx])
+    bbox_points = torch.FloatTensor(np.load(bbox_root)['arr_0'][img_idx])
+    score_full_path = '/media/tidy/Extreme SSD/graspnet_sh/score_maps/' + str(scene_op) +\
+            '/' + full_path.split('/')[-3] + '/numpy/' + full_path.split('/')[-1][:-4]+'.npz'
+
+    score_image_np = np.load(score_full_path)['arr_0']
+    score_image = torch.FloatTensor(score_image_np)
+    gt = get_heatmap(center_points, bbox_points, score_image).view(-1).cpu().numpy()
+    # score_with_rgb_image = cv2.applyColorMap((gt.view(720,1280) * 255).type(torch.uint8).cpu().numpy(), cv2.COLORMAP_RAINBOW).astype(np.uint8)
+    # cv2.imshow('da', score_with_rgb_image)
+    # cv2.waitKey(0)
+    inference_one_view(rgb_file, depth_file, meta_file, gt, scene_idx, anno_idx)
+    
 
 if __name__ == "__main__":
-    
+    # one_view_main()
+
+    # from multiprocessing import Pool
+    # p = Pool(processes = 8)
     scene_list = []
     if split == 'test':
         for i in range(100, 190):
@@ -371,8 +482,18 @@ if __name__ == "__main__":
             scene_list.append(i)
     else:
         print('invalid split')
-    
+    # print("scene list", scene_list)
+    # p.map(inference, scene_list)
     for scene_idx in scene_list:
         inference(scene_idx)
+        # p.apply_async(inference, (scene_idx))
+    # p.close()
+    # p.join()
     
+    print(f"5_50 : {total_ap_5_50.avg}, 4_50 : {total_ap_4_50.avg}, 8_50 : {total_ap_8_50.avg}")
+    print(f"5_1 : {total_ap_5_1.avg}, 4_1 : {total_ap_4_1.avg}, 8_1 : {total_ap_8_1.avg}")
+    
+    f = open('kcc_test_similar_result.txt', 'w')
+    f.writelines(f"5_50 : {total_ap_5_50.avg}, 4_50 : {total_ap_4_50.avg}, 8_50 : {total_ap_8_50.avg}")
+    f.writelines(f"5_1 : {total_ap_5_1.avg}, 4_1 : {total_ap_4_1.avg}, 8_1 : {total_ap_8_1.avg}")
 

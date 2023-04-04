@@ -12,7 +12,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_root', default='/DATA2/Benchmark/graspnet', help='Directory to save dataset')
-parser.add_argument('--saveroot', default='/DATA2/Benchmark/suction/center_bbox_test', help='Directory to save bbox results')
+parser.add_argument('--saveroot', default='/media/tidy/Extreme SSD/graspnet_sh', help='Directory to save bbox results')
 parser.add_argument('--save_visu', action='store_true', help='Whether to save visualizations')
 parser.add_argument('--camera', default='realsense', help='camera to use [default: realsense]')
 parser.add_argument('--pool_size', type=int, default=10, help='How many threads to use')
@@ -184,11 +184,9 @@ def get_center_bbox(scene_idx, camera='realsense'):
         mask_list_single = []
 
         for i, model in enumerate(model_list):
-            
             points = np.array(model.points)
             # print('points:', points.shape)
             center = np.mean(points, keepdims=True, axis=0)
-
             x, y, _ = points2depth(points, scene_idx, camera)
             # print('center:', center.shape)
             center_x, center_y, _ = points2depth(center, scene_idx, camera)
@@ -216,9 +214,10 @@ def get_center_bbox(scene_idx, camera='realsense'):
             center_pix = np.concatenate([center_y, center_x], axis=0)[np.newaxis, :]
             # print('center_pix:', center_pix.shape)
             center_list_single.append(center_pix)
-            if scene_idx < 10 and FLAGS.save_visu:
+            if anno_idx < 1 and FLAGS.save_visu:
                 rgb_image[max(min_y, 0): min(max_y, 720), max(min_x, 0): min(max_x, 1280), :] *= 0.5
-                cv2.circle(rgb_image, (center_x, center_y), 10, (255,0,0), -1)
+                # print("center x centery", (center_x, center_y))
+                cv2.circle(rgb_image, (center_x[0], center_y[0]), 10, (255,0,0), -1)
 
         bbox_single = np.concatenate(bbox_list_single, axis=0)[np.newaxis, :, :]                
         mask_single = np.array(mask_list_single, dtype=np.bool)[np.newaxis, :]
@@ -227,8 +226,7 @@ def get_center_bbox(scene_idx, camera='realsense'):
         # print('concatenate:', np.concatenate(center_list_single, axis=0).shape)
         center_single = np.concatenate(center_list_single, axis=0)[np.newaxis, :, :]
         center_list_scene.append(center_single)
-
-        if anno_idx < 10 and FLAGS.save_visu:
+        if anno_idx < 1 and FLAGS.save_visu:
             if (mask_single == 0).sum() == 0:
                 rgb_image = rgb_image.astype(np.uint8)
                 im = Image.fromarray(rgb_image)
@@ -261,7 +259,7 @@ if __name__ == "__main__":
     camera = FLAGS.camera  
 
     scene_list = []
-    for i in range(0, 100):
+    for i in range(100, 190):
         scene_list.append(i)
 
     pool_size = FLAGS.pool_size
